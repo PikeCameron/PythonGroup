@@ -34,8 +34,9 @@ class Recipe(db.DBbase):
     def delete_recipe(self, recipe_id):
         try:
             super().get_cursor.execute("DELETE FROM Recipes WHERE id = ?;", (recipe_id,))
+            super().get_cursor.execute("DELETE FROM Ingredients WHERE recipe_id = ?;", (recipe_id,))
             super().get_connection.commit()
-            print(f"Recipe ID {recipe_id} successfully deleted.")
+            print(f"Recipe ID {recipe_id} and associated ingredients successfully deleted.")
         except Exception as e:
             print("An error has occurred while deleting the recipe.", e)
 
