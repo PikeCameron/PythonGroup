@@ -1,14 +1,14 @@
 import DBbase as db
-
+import csv
 
 class Recipe(db.DBbase):
 
     def __init__(self):
         super().__init__("recipeDB.sqlite")
 
-    def add_recipe(self, name, category, ingredients):
+    def add_recipe(self, name, category_id, ingredients):
         try:
-            super().get_cursor.execute("INSERT INTO Recipes (name, category) VALUES (?, ?);", (name, category))
+            super().get_cursor.execute("INSERT INTO Recipes (name, category_id) VALUES (?, ?);", (name, category_id))
             recipe_id = super().get_cursor.lastrowid
 
             for ingredient in ingredients:
@@ -20,12 +20,17 @@ class Recipe(db.DBbase):
         except Exception as e:
             print("An error has occurred while adding the recipe.", e)
 
-    def update_recipe(self, recipe_id, name=None, category=None):
+    def update_recipe(self, recipe_id, name=None, category_id=None, ingredients=None):
         try:
             if name:
                 super().get_cursor.execute("UPDATE Recipes SET name = ? WHERE id = ?;", (name, recipe_id))
-            if category:
-                super().get_cursor.execute("UPDATE Recipes SET category = ? WHERE id = ?;", (category, recipe_id))
+            if category_id:
+                super().get_cursor.execute("UPDATE Recipes SET category_id = ? WHERE id = ?;", (category_id, recipe_id))
+            if ingredients is not None:
+                super().get_cursor.execute("DELETE FROM Ingredients WHERE recipe_id = ?;", (recipe_id,))
+                for ingredient in ingredients:
+                    super().get_cursor.execute("INSERT INTO Ingredients (recipe_id, name) VALUES (?, ?);",
+                                               (recipe_id, ingredient))
             super().get_connection.commit()
             print(f"Recipe ID {recipe_id} updated successfully.")
         except Exception as e:
@@ -43,31 +48,79 @@ class Recipe(db.DBbase):
     def fetch_recipes(self, id=None):
         try:
             if id is not None:
-                return super().get_cursor.execute("SELECT * FROM Recipes WHERE id = ?;", (id,)).fetchone()
+                return super().get_cursor.execute("""
+                                SELECT Recipes.id, Recipes.name, Categories.name AS category,
+                                       GROUP_CONCAT(Ingredients.name) AS ingredients
+                                FROM Recipes
+                                JOIN Categories ON Recipes.category_id = Categories.id
+                                LEFT JOIN Ingredients ON Recipes.id = Ingredients.recipe_id
+                                WHERE Recipes.id = ?
+                                GROUP BY Recipes.id;
+                            """, (id,)).fetchone()
             else:
-                return super().get_cursor.execute("SELECT * FROM Recipes;").fetchall()
+                return super().get_cursor.execute("""
+                                SELECT Recipes.id, Recipes.name, Categories.name AS category,
+                                       GROUP_CONCAT(Ingredients.name) AS ingredients
+                                FROM Recipes
+                                JOIN Categories ON Recipes.category_id = Categories.id
+                                LEFT JOIN Ingredients ON Recipes.id = Ingredients.recipe_id
+                                GROUP BY Recipes.id;
+                            """).fetchall()
         except Exception as e:
             print("An error has occurred while fetching recipes.", e)
 
-    def fetch_recipes_by_category(self, category=None):
+    def fetch_recipes_by_category(self, category_id=None):
         try:
-            if category is not None:
-                return super().get_cursor.execute("SELECT * FROM Recipes WHERE category = ?;", (category,)).fetchone()
+            if category_id is not None:
+                return super().get_cursor.execute("""
+                                SELECT Recipes.id, Recipes.name, Categories.name AS category,
+                                       GROUP_CONCAT(Ingredients.name) AS ingredients
+                                FROM Recipes
+                                JOIN Categories ON Recipes.category_id = Categories.id
+                                LEFT JOIN Ingredients ON Recipes.id = Ingredients.recipe_id
+                                WHERE Recipes.category_id = ?
+                                GROUP BY Recipes.id;
+                            """, (category_id,)).fetchall()
             else:
-                return super().get_cursor.execute("SELECT * FROM Recipes;").fetchall()
+                return super().get_cursor.execute("""
+                                SELECT Recipes.id, Recipes.name, Categories.name AS category,
+                                       GROUP_CONCAT(Ingredients.name) AS ingredients
+                                FROM Recipes
+                                JOIN Categories ON Recipes.category_id = Categories.id
+                                LEFT JOIN Ingredients ON Recipes.id = Ingredients.recipe_id
+                                GROUP BY Recipes.id;
+                            """).fetchall()
         except Exception as e:
             print("An error has occurred while fetching recipes.", e)
+
+    def get_valid_category(self):
+        while True:
+            try:
+                category = int(input("Enter category ID (1: Breakfast, 2: Lunch, 3: Dinner, 4: Dessert, 5: Snack): "))
+                if category not in range(1, 6):
+                    print("Invalid category. Please enter a number between 1 and 5.")
+                else:
+                    return category
+            except ValueError:
+                print("Invalid input. Please enter a number.")
 
     def reset_database(self):
         try:
             sql = """
                 DROP TABLE IF EXISTS Recipes;
                 DROP TABLE IF EXISTS Ingredients;
+                DROP TABLE IF EXISTS Categories;
+                
+                CREATE TABLE Categories (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
+                    name TEXT NOT NULL UNIQUE
+                );
 
                 CREATE TABLE Recipes (
                     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
                     name TEXT UNIQUE,
-                    category TEXT
+                    category_id INTEGER,
+                    FOREIGN KEY (category_id) REFERENCES Categories(id)
                 );
 
                 CREATE TABLE Ingredients (
@@ -78,6 +131,15 @@ class Recipe(db.DBbase):
                 );
             """
             super().execute_script(sql)
+
+            with open('seed.csv', newline='', encoding='utf-8-sig') as categories_file:
+                reader = csv.DictReader(categories_file)
+
+                for row in reader:
+                    super().get_cursor.execute("INSERT INTO Categories (name) VALUES (?);", (row['name'],))
+
+            super().get_connection.commit()
+            print("Database reset and populated with initial data from CSV.")
         except Exception as e:
             print("An error occurred while resetting the database.", e)
         finally:
@@ -86,7 +148,7 @@ class Recipe(db.DBbase):
 
 class Project:
     def run(self):
-        recipe_manager = Recipe()  # Provide a database name here
+        recipe_manager = Recipe()
 
         recipe_options = {
             "1": "Get all recipes",
@@ -121,25 +183,28 @@ class Project:
                 print(result)
                 input("Press return to continue")
 
+
             elif user_selection == "3":
-                category = input("Enter recipe category (e.g., dessert, dinner): ")
+                category = recipe_manager.get_valid_category()
                 result = recipe_manager.fetch_recipes_by_category(category)
                 print(result)
                 input("Press return to continue")
 
             elif user_selection == "4":
                 name = input("Enter recipe name: ")
-                category = input("Enter category (e.g., dessert, dinner): ")
+                category = recipe_manager.get_valid_category()
                 ingredients = input("Enter ingredients (comma separated): ").split(',')
-                ingredients = [ingredient.strip() for ingredient in ingredients]  # Clean up whitespace
+                ingredients = [ingredient.strip() for ingredient in ingredients]
                 recipe_manager.add_recipe(name, category, ingredients)
                 input("Press return to continue")
 
             elif user_selection == "5":
                 recipe_id = input("Enter recipe ID: ")
                 name = input("Enter new recipe name (leave blank to skip): ")
-                category = input("Enter new category (leave blank to skip): ")
-                recipe_manager.update_recipe(recipe_id, name if name else None, category if category else None)
+                category = recipe_manager.get_valid_category() if input("Update category? (y/n): ").lower() == "y" else None
+                ingredients = input("Enter new ingredients (comma separated) (leave blank to skip): ")
+                ingredients = [ingredient.strip() for ingredient in ingredients.split(',')] if ingredients else None
+                recipe_manager.update_recipe(recipe_id, name if name else None, category if category else None, ingredients)
                 input("Press return to continue")
 
             elif user_selection == "6":
